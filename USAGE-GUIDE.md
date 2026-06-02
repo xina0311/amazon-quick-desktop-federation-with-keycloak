@@ -1,16 +1,14 @@
 # Usage Guide: Configure Amazon Quick with Keycloak SSO
 
-This guide walks you through connecting your deployed Keycloak IdP to Amazon Quick Web and Desktop.
+[中文版](USAGE-GUIDE.zh.md) | English
+
+This guide walks you through connecting your deployed Keycloak IdP to Amazon Quick Web (SAML) and Amazon Quick Desktop (OIDC).
 
 ## Prerequisites
 
 - CloudFormation stack is in `CREATE_COMPLETE` status
-- You have access to the AWS Console with permissions to manage Amazon Quick
-- Amazon Quick application created (or you will create one)
-
-## Step 1: Gather Stack Outputs
-
-From the CloudFormation console (or CLI), note these values:
+- You have access to the AWS Console with admin permissions
+- Stack outputs ready (run command below to retrieve)
 
 ```bash
 aws cloudformation describe-stacks \
@@ -19,127 +17,197 @@ aws cloudformation describe-stacks \
   --output table
 ```
 
-Key values you'll need:
-- `IssuerURL` — e.g., `https://<IP>.nip.io:8443/realms/aws-realm`
-- `SAMLMetadataUrl` — e.g., `https://<IP>.nip.io:8443/realms/aws-realm/protocol/saml/descriptor`
-- `SAMLProviderArn` — e.g., `arn:aws:iam::<account>:saml-provider/Keycloak-Quick-IdP`
-- `QuickSightRoleArn` — e.g., `arn:aws:iam::<account>:role/QuickSight-Keycloak-Role`
-- `ClientID` — `amazon-quick-desktop`
-- `AuthEndpoint`, `TokenEndpoint`, `JWKSURI`
+---
 
-## Step 2: Verify Keycloak is Running
+## Phase 0: Sign Up for Amazon Quick
 
-1. Open `AdminConsoleURL` in your browser (e.g., `https://<IP>.nip.io:8443/admin/`)
-2. Accept the self-signed certificate warning if prompted
-3. Login with:
-   - Username: `admin`
-   - Password: The `AdminPwd` you set during deployment
+If you don't have an Amazon Quick account yet:
 
-4. Verify the `aws-realm` exists and contains:
-   - OIDC Client: `amazon-quick-desktop`
-   - SAML Client: `urn:amazon:webservices`
-   - User: `ws-lab-7f3k`
+1. Go to the Amazon Quick console and click **Sign up for Amazon Quick**
+
+   ![Sign up](images/01-signup-amazon-quick.png)
+
+2. Fill in account details:
+   - **Account name**: Choose a name (e.g., `anycompany-quick`)
+   - **Email for account notifications**: Your admin email
+   - **Default region**: US East (N. Virginia)
+   - **Authentication method**: Select **Password-based or Single-Sign On (Recommended)**
+   - **Encryption**: Use AWS-managed key (Default)
+   - Click **Create account**
+
+   ![Auth method](images/02-signup-auth-method.png)
+
+> **Important**: You must select "Password-based or Single-Sign On" to enable SAML/OIDC federation with Keycloak.
 
 ---
 
-## Step 3: Configure Amazon Quick Web (SAML)
+## Phase 1: Configure Quick Web SAML SSO
 
-### 3.1 Create or Select Amazon Quick Application
+### Step 1: Open SSO Configuration Page
 
-1. Go to **Amazon Quick Console** → **Applications**
-2. Create a new application or select an existing one
-3. In the application settings, find **Authentication / Identity Provider** section
+1. Log in to the Amazon Quick Admin Console
+2. Left menu → **Single Sign-on (SSO)**
+3. URL format: `https://us-east-1.quicksight.aws.amazon.com/sn/account/<ACCOUNT_NAME>/admin`
 
-### 3.2 Configure SAML Federation
+### Step 2: Enable Email Syncing for Federated Users
 
-In the Amazon Quick application IAM Identity Provider settings:
+At the top of the SSO page:
+- Set **Email Syncing for Federated Users** → **ON**
+- This allows Quick to use the preconfigured email address from your IdP
 
-1. **SAML Provider ARN**: Use the `SAMLProviderArn` from stack outputs
-2. **IAM Role ARN**: Use the `QuickSightRoleArn` from stack outputs
+### Step 3: Configure Service Provider Initiated SSO
 
-### 3.3 Configure QuickSight (if using QuickSight integration)
-
-1. Go to **QuickSight Console** → **Manage QuickSight** → **Security & permissions**
-2. Under **Identity providers**, configure:
-   - **Type**: SAML
-   - **IAM Role**: `QuickSightRoleArn`
-   - **SAML Provider**: `SAMLProviderArn`
-
-### 3.4 Test Amazon Quick Web Login
-
-1. Navigate to your Amazon Quick Web application URL
-2. You should be redirected to Keycloak login
-3. Login with:
-   - Username: `ws-lab-7f3k`
-   - Password: Your `AdminPwd`
-4. After successful authentication, you should be redirected back to Amazon Quick Web
-
----
-
-## Step 4: Configure Amazon Quick Desktop (OIDC)
-
-### 4.1 Enable Amazon Quick Desktop Extension Access
-
-1. Go to **Amazon Quick Console** → **Applications** → Your app
-2. Navigate to **Extensions** or **Desktop access** settings
-3. Enable Amazon Quick Desktop access for the application
-
-### 4.2 Configure OIDC in Amazon Quick Admin
-
-In the Amazon Quick application's identity settings for Desktop:
+Fill in the Configuration section:
 
 | Field | Value |
 |-------|-------|
-| Issuer URL | `https://<IP>.nip.io:8443/realms/aws-realm` |
-| Authorization Endpoint | `https://<IP>.nip.io:8443/realms/aws-realm/protocol/openid-connect/auth` |
-| Token Endpoint | `https://<IP>.nip.io:8443/realms/aws-realm/protocol/openid-connect/token` |
-| JWKS URI | `https://<IP>.nip.io:8443/realms/aws-realm/protocol/openid-connect/certs` |
-| Client ID | `amazon-quick-desktop` |
-| Scopes | `openid email profile offline_access` |
+| IdP URL | `https://<EIP>.nip.io:8443/realms/aws-realm/protocol/saml/clients/amazon-aws` |
+| IdP redirect URL parameter | `RelayState` |
 
-> **Note**: The OIDC client uses PKCE (S256) — no client secret is needed.
+Click **Save** and wait until the fields become disabled (Edit/Delete buttons appear).
 
-### 4.3 Configure Amazon Quick Desktop Client
+> **Warning**: You MUST click Save BEFORE turning on SSO. If you toggle ON first, you'll get an error "Enter a configuration first".
 
-1. Open Amazon Quick Desktop application
-2. Go to **Settings** → **Account** or **Sign In**
-3. Select **Use custom identity provider** or enterprise SSO option
-4. The client should auto-discover settings from the Amazon Quick application configuration
+### Step 4: Turn On SSO
 
-### 4.4 Test Amazon Quick Desktop Login
+1. Under **Status**, click **ON**
+2. Confirm dialog "Turn on SSO?" → Click **Turn on SSO**
 
-1. Click **Sign In** in Amazon Quick Desktop
-2. A browser window opens with the Keycloak login page
-3. Enter credentials:
-   - Username: `ws-lab-7f3k`
-   - Password: Your `AdminPwd`
-4. After login, Amazon Quick Desktop should show "Connected" status
+   ![SSO Configuration](images/03-sso-configuration.png)
+
+### Step 5: Test Quick Web SSO
+
+Open an incognito browser window and visit:
+
+```
+https://us-east-1.quicksight.aws.amazon.com/sn/auth/signin?account=<ACCOUNT_NAME>&enable-sso=1
+```
+
+You should be redirected to Keycloak login. Enter:
+- Username: `ws-lab-7f3k`
+- Password: Your `AdminPwd`
+
+After authentication, you'll be redirected back to Amazon Quick Web.
 
 ---
 
-## Step 5: Create Additional Users (Optional)
+## Phase 2: Configure Quick Desktop OIDC (Extension Access)
+
+### Step 1: Open Extension Access Page
+
+In the Amazon Quick Admin Console:
+- Left menu → **Extension access** (under Permissions section)
+
+### Step 2: Add Extension Access
+
+1. Click **Add extension access**
+2. Select **Amazon Quick — Desktop application for Quick**
+3. Click **Next** to proceed to the Details page
+
+### Step 3: Fill in OIDC Configuration
+
+   ![Add Extension Access](images/04-add-extension-access.png)
+
+| Field | Value |
+|-------|-------|
+| Name | `QuickDesktop-access` (pre-filled, keep as-is) |
+| Description | `Desktop application for Quick` (pre-filled) |
+| Issuer URL | `https://<EIP>.nip.io:8443/realms/aws-realm` |
+| Authorization Endpoint | `https://<EIP>.nip.io:8443/realms/aws-realm/protocol/openid-connect/auth` |
+| Token Endpoint | `https://<EIP>.nip.io:8443/realms/aws-realm/protocol/openid-connect/token` |
+| JWKS URI | `https://<EIP>.nip.io:8443/realms/aws-realm/protocol/openid-connect/certs` |
+| Client ID | `amazon-quick-desktop` |
+
+> **Warning**: OIDC configuration fields cannot be edited after creation. You can only delete and recreate. Double-check all values before clicking Add.
+
+### Step 4: Submit
+
+Click **Add**. You should see a green notification: "QuickDesktop-access added successfully".
+
+---
+
+## Phase 3: Create and Activate Desktop Extension
+
+### Step 1: Go to Extensions Page
+
+Switch to the **Amazon Quick Console** (not Admin Console):
+- Left menu → **Extensions**
+
+### Step 2: Create Extension
+
+1. Click **Create extension** (top right)
+2. Select **QuickDesktop-access** from the list
+3. Click **Next**
+
+   ![Create Extension](images/05-create-extension.png)
+
+4. Confirm and ensure status shows **Active**
+
+### Step 3: Download Desktop Client
+
+From the QuickDesktop-extension row:
+- Click the **...** menu on the right
+- Select **Download for Mac** or **Download for Windows**
+
+> **Important**: This step cannot be skipped! Without an active Extension, the Desktop client cannot discover the OIDC configuration.
+
+---
+
+## Phase 4: Test and Verify
+
+### Quick Web SSO Test
+
+1. Open incognito browser
+2. Visit: `https://us-east-1.quicksight.aws.amazon.com/sn/auth/signin?account=<ACCOUNT_NAME>&enable-sso=1`
+3. Redirects to Keycloak → Login with `ws-lab-7f3k` → Enters Quick Web
+
+### Quick Desktop SSO Test
+
+1. Launch Amazon Quick Desktop
+2. Choose **Enterprise sign-in**
+3. Enter your account name
+4. Browser opens Keycloak login page
+5. Login with `ws-lab-7f3k` / your password
+6. Returns to Desktop → Shows "Connected" status
+
+### Quick Verification Commands
+
+```bash
+# OIDC Discovery - should return issuer URL
+curl -sk https://<EIP>.nip.io:8443/realms/aws-realm/.well-known/openid-configuration | jq .issuer
+
+# SAML Metadata - should return XML
+curl -sk https://<EIP>.nip.io:8443/realms/aws-realm/protocol/saml/descriptor | head -1
+
+# Keycloak Health Check
+curl -sk https://<EIP>.nip.io:9000/health/ready
+```
+
+---
+
+## Create Additional Users
 
 ### Via Keycloak Admin Console
 
-1. Open `AdminConsoleURL` → Login as admin
+1. Open `https://<EIP>.nip.io:8443/admin/` → Login as `admin`
 2. Select **aws-realm** from the realm dropdown
 3. Go to **Users** → **Add user**
 4. Fill in:
    - Username (required)
-   - Email (required for SAML)
+   - Email (required for SAML federation)
    - First name / Last name
-   - Email verified: ON
+   - Email verified: **ON**
 5. Click **Create**
 6. Go to **Credentials** tab → **Set password**
    - Enter password
-   - Temporary: OFF
+   - Temporary: **OFF**
    - Click **Save**
 
 ### Via Keycloak API
 
 ```bash
 # Get admin token
-KC="https://<IP>.nip.io:8443"
+KC="https://<EIP>.nip.io:8443"
 TOKEN=$(curl -sk -X POST "$KC/realms/master/protocol/openid-connect/token" \
   -d "username=admin&password=YOUR_ADMIN_PWD&grant_type=password&client_id=admin-cli" \
   | jq -r '.access_token')
@@ -161,59 +229,49 @@ curl -sk -X POST "$KC/admin/realms/aws-realm/users" \
 
 ---
 
+## Important Notes
+
+- **EIP is fixed**: The public IP does not change on instance stop/start. All configurations remain valid.
+- **TLS Certificate**: Auto-renews monthly via cron job. No manual intervention needed.
+- **First SAML login**: Quick Web will ask to confirm the email address to register as a federated user.
+- **Shared realm**: The same user in `aws-realm` can log in to both Quick Web and Quick Desktop.
+- **Keycloak container auto-restarts**: If the instance reboots, Keycloak comes back automatically.
+
+---
+
 ## Troubleshooting
 
 ### Keycloak Not Accessible
 
-1. Check EC2 instance is running:
-   ```bash
-   aws ec2 describe-instances --filters "Name=tag:Name,Values=keycloak-quick-desktop" \
-     --query 'Reservations[].Instances[].State.Name'
-   ```
+1. Verify instance is running: check EC2 console or `aws ec2 describe-instances`
 2. Check Security Group allows inbound on port 8443
-3. Check CloudFormation events for deployment errors:
-   ```bash
-   aws cloudformation describe-stack-events --stack-name keycloak-quick-idp \
-     --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`]'
-   ```
+3. Check CloudFormation stack events for errors
 
-### Certificate Issues
+### SSO "Enter a configuration first" Error
 
-- The TLS certificate is issued by Let's Encrypt for `<IP>.nip.io`
-- If you see certificate warnings, ensure you're accessing via the nip.io domain, not the raw IP
-- Certificate auto-renews but requires port 80 to be accessible
+You tried to toggle SSO ON before saving the configuration. Click Save first, then toggle ON.
 
-### SAML Login Fails
+### OIDC Extension Access Creation Fails
 
-1. Verify SAML metadata is accessible: open `SAMLMetadataUrl` in browser
-2. Check IAM SAML Provider is using the correct metadata:
-   ```bash
-   aws iam get-saml-provider --saml-provider-arn <SAMLProviderArn>
-   ```
-3. Ensure the user has an email attribute set in Keycloak (required for SAML NameID)
+- Verify all endpoint URLs are reachable from the browser
+- Ensure no trailing slashes in URLs
+- Client ID must match exactly: `amazon-quick-desktop`
 
-### OIDC Login Fails
+### Quick Desktop Cannot Discover OIDC
 
-1. Verify OIDC discovery endpoint:
-   ```
-   https://<IP>.nip.io:8443/realms/aws-realm/.well-known/openid-configuration
-   ```
-2. Ensure Client ID matches: `amazon-quick-desktop`
-3. Check that `offline_access` scope is in the client's default scopes
+- Ensure the Extension is created and **Active** (Phase 3)
+- The Extension links the OIDC configuration to the Desktop client
 
-### Instance Restart
+### Certificate Warnings
 
-If the EC2 instance is stopped and restarted:
-- The Elastic IP remains attached (IP doesn't change)
-- Keycloak Docker container auto-restarts (`--restart unless-stopped`)
-- Let's Encrypt certificate persists on the EBS volume
-- No reconfiguration needed
+- Access Keycloak via `https://<EIP>.nip.io:8443` (not raw IP)
+- Let's Encrypt certificates are trusted by all major browsers and clients
 
 ---
 
 ## Security Recommendations for Production
 
-1. **Restrict Security Group**: Limit port 8443 access to known IP ranges
+1. **Restrict Security Group**: Limit port 8443 to known IP ranges
 2. **Use a custom domain**: Replace nip.io with a proper domain + Route53
 3. **Scope down IAM Role**: Replace `quicksight:*` with minimum required permissions
 4. **Enable MFA**: Configure Keycloak to require MFA for users
