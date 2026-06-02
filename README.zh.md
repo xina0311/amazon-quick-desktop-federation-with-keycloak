@@ -40,7 +40,7 @@ graph TB
 | 安全组 | 端口 8443（Keycloak HTTPS）、80（证书续期）、22（SSH，可选） |
 | IAM SAML Provider | 与 Keycloak 联合，用于 Amazon Quick Web |
 | IAM Role | SAML 联合角色，用于 Amazon Quick 访问 |
-| TLS 证书 | Let's Encrypt 自动申请 + 每日自动续期 |
+| TLS 证书 | Let's Encrypt 自动申请 + 每月自动续期 |
 
 ## 前提条件
 
@@ -82,7 +82,7 @@ aws cloudformation create-stack \
 - **必须提供强密码** — 模板没有默认密码，不提供会部署失败。
 - Keycloak 管理控制台地址：`https://<EIP>.nip.io:8443/admin/` — 如需限制访问请修改安全组。
 - 端口 22（SSH）默认开放，不需要可从安全组移除。
-- TLS 通过 Let's Encrypt 强制加密，每日自动续期。
+- TLS 通过 Let's Encrypt 强制加密，每月自动续期。
 - IAM 角色授予 `quicksight:*` 权限 — 生产环境请收窄权限范围。
 
 ## 部署时间

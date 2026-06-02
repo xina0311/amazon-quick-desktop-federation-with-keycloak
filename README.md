@@ -40,7 +40,7 @@ graph TB
 | Security Group | Ports 8443 (Keycloak HTTPS), 80 (cert renewal), 22 (SSH, optional) |
 | IAM SAML Provider | Federation with Keycloak for Amazon Quick Web |
 | IAM Role | SAML federation role for Amazon Quick access |
-| TLS Certificate | Auto-provisioned via Let's Encrypt with auto-renewal cron job |
+| TLS Certificate | Auto-provisioned via Let's Encrypt with monthly auto-renewal cron job |
 
 ## Prerequisites
 
@@ -94,7 +94,7 @@ The stack takes approximately **15-20 minutes** to reach `CREATE_COMPLETE`. The 
 3. Starts Keycloak container
 4. Configures realm, OIDC client, SAML client, and test user
 5. Updates IAM SAML Provider with real Keycloak metadata
-6. Sets up certificate auto-renewal (daily cron)
+6. Sets up certificate auto-renewal (monthly cron)
 7. Signals CloudFormation success
 
 ## Stack Outputs

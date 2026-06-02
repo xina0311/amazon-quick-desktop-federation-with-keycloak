@@ -237,7 +237,7 @@ Resources:
           # Step 17: Auto-renew cert
           dnf install -y cronie && systemctl enable crond && systemctl start crond
           cat > /etc/cron.d/certbot-renew << 'CRON'
-          0 3 * * * root certbot renew --standalone --pre-hook "fuser -k 80/tcp 2>/dev/null || true" --post-hook "docker restart keycloak" --quiet
+          0 3 1 * * root certbot renew --standalone --pre-hook "fuser -k 80/tcp 2>/dev/null || true" --post-hook "docker restart keycloak" --quiet
           CRON
           chmod 644 /etc/cron.d/certbot-renew
           # Done

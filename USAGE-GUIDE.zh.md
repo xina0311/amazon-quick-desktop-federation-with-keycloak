@@ -181,7 +181,7 @@ curl -sk -X POST "$KC/admin/realms/aws-realm/users" \
 
 - TLS 证书由 Let's Encrypt 为 `<IP>.nip.io` 颁发
 - 如看到证书警告，确保通过 nip.io 域名访问，而非裸 IP
-- 证书每日自动续期，但需要 80 端口可访问
+- 证书每月自动续期，但需要 80 端口可访问
 
 ### SAML 登录失败
 
