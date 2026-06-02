@@ -101,7 +101,7 @@ In the Amazon Quick application's identity settings for Desktop:
 
 ### 4.3 Configure Amazon Quick Desktop Client
 
-1. Open Amazon Amazon Quick Desktop application
+1. Open Amazon Quick Desktop application
 2. Go to **Settings** → **Account** or **Sign In**
 3. Select **Use custom identity provider** or enterprise SSO option
 4. The client should auto-discover settings from the Amazon Quick application configuration

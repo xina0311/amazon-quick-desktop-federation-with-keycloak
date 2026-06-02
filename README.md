@@ -1,30 +1,34 @@
-# Keycloak IdP for Amazon Quick (Quick Web & Desktop)
+# Keycloak IdP for Amazon Quick (Web & Desktop)
+
+[中文版](README.zh.md) | English
 
 One-click CloudFormation deployment of a Keycloak 26.1.4 Identity Provider pre-configured for both **Amazon Quick Web** (SAML 2.0) and **Amazon Quick Desktop** (OIDC + PKCE).
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  AWS Account                                                     │
-│                                                                   │
-│  ┌──────────────────────┐        ┌────────────────────────────┐  │
-│  │  EC2 (t3.small)      │        │  IAM                       │  │
-│  │  - Keycloak 26.1.4   │        │  - SAML Provider           │  │
-│  │  - Docker            │        │  - QuickSight SAML Role    │  │
-│  │  - Let's Encrypt TLS │        │                            │  │
-│  │  - Elastic IP        │        └────────────────────────────┘  │
-│  └──────────────────────┘                                        │
-│           │                                                       │
-│           │ HTTPS :8443                                           │
-│           ▼                                                       │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  Keycloak Realm: aws-realm                                │    │
-│  │                                                            │    │
-│  │  SAML Client ──────────► Amazon Quick Web (SAML)     │    │
-│  │  OIDC Client ──────────► Amazon Quick Desktop (OIDC) │    │
-│  └──────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph AWS Account
+        subgraph EC2 Instance - Elastic IP
+            KC[Keycloak 26.1.4<br/>Docker + Let's Encrypt TLS<br/>Port 8443]
+        end
+        subgraph IAM
+            SP[SAML Provider]
+            ROLE[SAML Federation Role<br/>quicksight:*]
+        end
+        SG[Security Group<br/>8443 / 80 / 22]
+    end
+
+    subgraph Amazon Quick
+        QW[Amazon Quick Web]
+        QD[Amazon Quick Desktop]
+    end
+
+    KC -->|SAML 2.0| SP
+    SP -->|AssumeRoleWithSAML| ROLE
+    ROLE -->|Federation| QW
+    KC -->|OIDC + PKCE| QD
+    SG -.->|Protects| KC
 ```
 
 ## What Gets Deployed
@@ -35,8 +39,8 @@ One-click CloudFormation deployment of a Keycloak 26.1.4 Identity Provider pre-c
 | Elastic IP | Fixed public IP (survives instance stop/start) |
 | Security Group | Ports 8443 (Keycloak HTTPS), 80 (cert renewal), 22 (SSH, optional) |
 | IAM SAML Provider | Federation with Keycloak for Amazon Quick Web |
-| IAM Role | QuickSight SAML role for federated access |
-| TLS Certificate | Auto-provisioned via Let's Encrypt (nip.io domain) |
+| IAM Role | SAML federation role for Amazon Quick access |
+| TLS Certificate | Auto-provisioned via Let's Encrypt with auto-renewal cron job |
 
 ## Prerequisites
 
@@ -47,9 +51,7 @@ One-click CloudFormation deployment of a Keycloak 26.1.4 Identity Provider pre-c
 
 ### Option 1: AWS Console
 
-[![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home#/stacks/new?templateURL=https://raw.githubusercontent.com/YOUR_REPO_PATH/main/keycloak-quick-desktop-cfn.yaml)
-
-> Replace `YOUR_REPO_PATH` with your actual GitHub path after forking.
+[![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home#/stacks/new?templateURL=https://raw.githubusercontent.com/xina0311/amazon-quick-desktop-federation-with-keycloak/main/keycloak-quick-desktop-cfn.yaml)
 
 ### Option 2: AWS CLI
 
@@ -62,6 +64,8 @@ aws cloudformation create-stack \
   --region us-east-1
 ```
 
+> **Important**: Replace `YOUR_STRONG_PASSWORD_HERE` with a strong password (8-32 chars, alphanumeric + `_` `-`). This password is used for both the Keycloak admin account and the test user.
+
 ## Parameters
 
 | Parameter | Required | Description |
@@ -70,15 +74,15 @@ aws cloudformation create-stack \
 | `InstanceType` | No | EC2 instance type (default: `t3.small`) |
 | `QuickUserEmail` | No | If provided, creates an additional Keycloak user with this email |
 | `KeyPairName` | No | EC2 Key Pair for SSH access (leave empty to disable SSH login) |
-| `QuickSightRoleName` | No | IAM role name for SAML federation (default: `QuickSight-Keycloak-Role`) |
-| `SAMLProviderName` | No | IAM SAML provider name (default: `Keycloak-Quick-IdP`) |
+| `QuickSightRoleName` | No | IAM role name for SAML federation (default: `QuickSight-Keycloak-SSO-Role`) |
+| `SAMLProviderName` | No | IAM SAML provider name (default: `Keycloak`) |
 
 ## Security Notes
 
-- **Change the default password** before deployment. Use a strong password with mixed case, numbers, and special characters.
+- **You must provide a strong password** — the template has no default password, deployment will fail without one.
 - The Keycloak admin console is accessible at `https://<EIP>.nip.io:8443/admin/` — restrict access via Security Group if needed.
 - Port 22 (SSH) is open by default. Remove it from the Security Group if not needed.
-- TLS is enforced via Let's Encrypt certificate (auto-provisioned during deployment).
+- TLS is enforced via Let's Encrypt certificate (auto-provisioned, auto-renewed via daily cron job).
 - The IAM role grants `quicksight:*` permissions — scope down for production use.
 
 ## Deployment Timeline
@@ -90,7 +94,8 @@ The stack takes approximately **15-20 minutes** to reach `CREATE_COMPLETE`. The 
 3. Starts Keycloak container
 4. Configures realm, OIDC client, SAML client, and test user
 5. Updates IAM SAML Provider with real Keycloak metadata
-6. Signals CloudFormation success
+6. Sets up certificate auto-renewal (daily cron)
+7. Signals CloudFormation success
 
 ## Stack Outputs
 
@@ -100,12 +105,12 @@ After successful deployment, the stack provides these outputs:
 |--------|-------------|
 | `KeycloakURL` | Keycloak base URL |
 | `AdminConsoleURL` | Keycloak admin console |
-| `IssuerURL` | OIDC Issuer URL (for Amazon Quick Desktop configuration) |
+| `IssuerURL` | OIDC Issuer URL (for Amazon Quick Desktop) |
 | `AuthEndpoint` | OIDC Authorization endpoint |
 | `TokenEndpoint` | OIDC Token endpoint |
 | `JWKSURI` | OIDC JWKS endpoint |
 | `ClientID` | OIDC Client ID (`amazon-quick-desktop`) |
-| `SAMLProviderArn` | IAM SAML Provider ARN (for Amazon Quick Web configuration) |
+| `SAMLProviderArn` | IAM SAML Provider ARN (for Amazon Quick Web) |
 | `QuickSightRoleArn` | IAM Role ARN for SAML federation |
 | `SAMLMetadataUrl` | SAML metadata URL |
 | `IdPInitiatedSSOUrl` | IdP-initiated SSO URL |
