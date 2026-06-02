@@ -1,0 +1,283 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Keycloak 26.1.4 + Quick Desktop (OIDC) + Quick Web (SAML) SSO
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium, t3.large]
+  AdminPwd:
+    Type: String
+    Description: 'Admin password for Keycloak and test user. MUST be changed before deployment.'
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 32
+    AllowedPattern: '[a-zA-Z0-9_\-]+'
+  QuickUserEmail:
+    Type: String
+    Default: ""
+    AllowedPattern: '([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})?'
+  KeyPairName:
+    Type: String
+    Default: ''
+  QuickSightRoleName:
+    Type: String
+    Default: QuickSight-Keycloak-SSO-Role
+  SAMLProviderName:
+    Type: String
+    Default: Keycloak
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+
+Resources:
+  KeycloakSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Keycloak SSO - Ports 80, 8443, 9000, 22
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 8443, ToPort: 8443, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 9000, ToPort: 9000, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: 0.0.0.0/0}
+      Tags:
+        - {Key: Name, Value: keycloak-quick-desktop-sg}
+
+  KeycloakInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: CfnAndSAML
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [cloudformation:SignalResource, cloudformation:DescribeStackResource]
+                Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+              - Effect: Allow
+                Action: [iam:UpdateSAMLProvider, iam:GetSAMLProvider]
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:saml-provider/${SAMLProviderName}'
+
+  KeycloakInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref KeycloakInstanceRole]
+
+  KeycloakSAMLProvider:
+    Type: AWS::IAM::SAMLProvider
+    Properties:
+      Name: !Ref SAMLProviderName
+      SamlMetadataDocument: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" entityID="https://placeholder.example.com/realms/placeholder">
+          <md:IDPSSODescriptor WantAuthnRequestsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+            <md:KeyDescriptor use="signing">
+              <ds:KeyInfo>
+                <ds:X509Data>
+                  <ds:X509Certificate>MIIDDTCCAfWgAwIBAgIUPZOrdB0PsnZ+NQEPSK4yUudFyYUwDQYJKoZIhvcNAQELBQAwFjEUMBIGA1UEAwwLcGxhY2Vob2xkZXIwHhcNMjYwNTMwMTMwMTIxWhcNMzYwNTI3MTMwMTIxWjAWMRQwEgYDVQQDDAtwbGFjZWhvbGRlcjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKeZf2ENM/U6VmW0RAdwRr6XVA4nuQw/3vk6JGQ78/ovNTEcMxHkqhacT9frKjS9r/9O2xU1cmQPNrO+mmz+dFl9Y77vrg4KtPggu8Pax1paw+IUV23bJv7WvP6vgLXiY7oDteOwZWxZVxNv+1siPyDSqst1LQsMfyLflj1U9destAN12TQcry3e4GLERoBeIe7J8hiZyWQqwy0i8ACOc5eV42HaVeBpFZLwLp8XkSLKRBHrxeBpfWf8OV+tba1/oh5T/3fpC1WzMsCiJfTDqBWIjk18E1R6/BmspVUCWZMkVLSL2M1aITE4IMs9rgb/qDQCJeuNmbpglPDqsh403PcCAwEAAaNTMFEwHQYDVR0OBBYEFPqeQQ6Z4IsPnVRzLWAvbOh108KeMB8GA1UdIwQYMBaAFPqeQQ6Z4IsPnVRzLWAvbOh108KeMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAIcUmSNu/JtsfvArohfvj2BuWVZZlsv8haeE5FQ4ghy/puElxvCX6CuEjLvKlqb6LJmV+SZp8QOV1PHrP1tvrVdPh6cuxm0v7Vj7rZfnBkc1YDKz2g3w2E/XbqQs6cIj5NjHcswED/32IMUxO5MBZVBNJne3PWPfEszBngPKYaQ1y4mCzdK23E5UPN1rIX0nObiSqaaurLwUS5O8uRWd0VLtzvGLrC7OEJu1G05EzoQg4/EMnhzBAfgOoVEBN3IexEDk7COxs42B91AFFLuHqEJT/iogKRGqUP3QStaVynOQmzwzK2Bj9czPU6DgmfUnBaPMFs6d1TDiYxQ24zvFqwk=</ds:X509Certificate>
+                </ds:X509Data>
+              </ds:KeyInfo>
+            </md:KeyDescriptor>
+            <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+            <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://placeholder.example.com/realms/placeholder/protocol/saml"/>
+            <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://placeholder.example.com/realms/placeholder/protocol/saml"/>
+          </md:IDPSSODescriptor>
+        </md:EntityDescriptor>
+      Tags:
+        - {Key: Purpose, Value: Keycloak-SAML-SSO}
+
+  QuickSightSAMLRole:
+    Type: AWS::IAM::Role
+    DependsOn: KeycloakSAMLProvider
+    Properties:
+      RoleName: !Ref QuickSightRoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:saml-provider/${SAMLProviderName}'
+            Action: ['sts:AssumeRoleWithSAML', 'sts:TagSession']
+            Condition:
+              StringEquals:
+                'SAML:aud': 'https://signin.aws.amazon.com/saml'
+      Policies:
+        - PolicyName: QuickSightAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'quicksight:*'
+                Resource: '*'
+
+  KeycloakInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: KeycloakSAMLProvider
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT25M
+        Count: 1
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      IamInstanceProfile: !Ref KeycloakInstanceProfile
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
+      SecurityGroupIds: [!GetAtt KeycloakSecurityGroup.GroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 20, VolumeType: gp3}
+      Tags:
+        - {Key: Name, Value: keycloak-quick-desktop}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          ADMIN_CRED="${AdminPwd}"
+          QUICK_USER_EMAIL="${QuickUserEmail}"
+          STACK_NAME="${AWS::StackName}"
+          REGION="${AWS::Region}"
+          ACCT="${AWS::AccountId}"
+          SAML_NAME="${SAMLProviderName}"
+          ROLE_NAME="${QuickSightRoleName}"
+          exec > >(tee /var/log/keycloak-setup.log) 2>&1
+          echo "=== Setup Started $(date) ==="
+          signal_failure() { echo "FAIL: $1"; /opt/aws/bin/cfn-signal -e 1 --stack ${!STACK_NAME} --resource KeycloakInstance --region ${!REGION}; exit 1; }
+          # Step 1: Install
+          dnf update -y || signal_failure "dnf update"
+          dnf install -y docker python3-pip jq bind-utils || signal_failure "dnf install"
+          pip3 install certbot || signal_failure "pip certbot"
+          systemctl enable docker && systemctl start docker
+          # Step 2: Get IP (wait for EIP association)
+          for i in $(seq 1 60); do
+            TOK=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+            PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: ${!TOK}" http://169.254.169.254/latest/meta-data/public-ipv4)
+            [ -n "${!PUBLIC_IP}" ] && break
+            sleep 5
+          done
+          [ -z "${!PUBLIC_IP}" ] && signal_failure "get IP"
+          DOMAIN="${!PUBLIC_IP}.nip.io"
+          echo "Domain: ${!DOMAIN}"
+          # Step 3: Cert
+          fuser -k 80/tcp 2>/dev/null || true; sleep 2
+          for i in $(seq 1 30); do
+            R=$(dig +short "${!DOMAIN}" 2>/dev/null | head -1)
+            [ "${!R}" = "${!PUBLIC_IP}" ] && break
+            sleep 5
+          done
+          if [ -n "${!QUICK_USER_EMAIL}" ]; then EA="--email ${!QUICK_USER_EMAIL}"; else EA="--register-unsafely-without-email"; fi
+          certbot certonly --standalone --non-interactive --agree-tos ${!EA} --domain "${!DOMAIN}" --preferred-challenges http || signal_failure "certbot"
+          # Step 4: Copy certs
+          mkdir -p /opt/keycloak/cert
+          cp -L /etc/letsencrypt/live/${!DOMAIN}/fullchain.pem /opt/keycloak/cert/fullchain.pem
+          cp -L /etc/letsencrypt/live/${!DOMAIN}/privkey.pem /opt/keycloak/cert/privkey.pem
+          chmod 644 /opt/keycloak/cert/*.pem
+          # Step 5: Start Keycloak
+          docker run -d --name keycloak --restart unless-stopped -p 8443:8443 -p 9000:9000 -v /opt/keycloak/cert:/opt/keycloak/cert:ro -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=${!ADMIN_CRED} -e KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/cert/fullchain.pem -e KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/cert/privkey.pem -e KC_HOSTNAME="https://${!DOMAIN}:8443" -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true quay.io/keycloak/keycloak:26.1.4 start || signal_failure "docker run"
+          # Step 6: Wait ready
+          KC="https://${!DOMAIN}:8443"
+          for i in $(seq 1 60); do
+            [ "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:9000/health/ready 2>/dev/null)" = "200" ] && break
+            sleep 2
+          done
+          curl -sk https://localhost:9000/health/ready | grep -q UP || signal_failure "keycloak not ready"
+          # Step 7: Admin token
+          ADMIN_TOKEN=$(curl -sk -X POST "${!KC}/realms/master/protocol/openid-connect/token" -d "username=admin&password=${!ADMIN_CRED}&grant_type=password&client_id=admin-cli" | jq -r '.access_token')
+          [ -z "${!ADMIN_TOKEN}" ] || [ "${!ADMIN_TOKEN}" = "null" ] && signal_failure "admin token"
+          AUTH="Authorization: Bearer ${!ADMIN_TOKEN}"
+          # Step 8: Create realm
+          curl -sk -X POST "${!KC}/admin/realms" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"realm":"aws-realm","enabled":true,"displayName":"AWS Quick SSO","sslRequired":"external","loginWithEmailAllowed":true,"resetPasswordAllowed":true,"bruteForceProtected":true}'
+          echo "Realm created"
+          # Step 9: OIDC Client
+          curl -sk -X POST "${!KC}/admin/realms/aws-realm/clients" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"clientId":"amazon-quick-desktop","name":"Quick Desktop","enabled":true,"publicClient":true,"protocol":"openid-connect","standardFlowEnabled":true,"directAccessGrantsEnabled":true,"redirectUris":["http://localhost:*","http://127.0.0.1:*","https://localhost:*","quick://callback","http://localhost:9876/callback"],"webOrigins":["+"],"attributes":{"pkce.code.challenge.method":"S256","post.logout.redirect.uris":"http://localhost:*##http://127.0.0.1:*"}}'
+          echo "OIDC client created"
+          # Step 10: offline_access scope
+          CID=$(curl -sk "${!KC}/admin/realms/aws-realm/clients?clientId=amazon-quick-desktop" -H "${!AUTH}" | jq -r '.[0].id')
+          OSID=$(curl -sk "${!KC}/admin/realms/aws-realm/client-scopes" -H "${!AUTH}" | jq -r '.[] | select(.name=="offline_access") | .id')
+          [ -n "${!OSID}" ] && curl -sk -X PUT "${!KC}/admin/realms/aws-realm/clients/${!CID}/default-client-scopes/${!OSID}" -H "${!AUTH}"
+          # Step 11: Create default workshop user
+          curl -sk -X POST "${!KC}/admin/realms/aws-realm/users" -H "${!AUTH}" -H "Content-Type: application/json" -d "{\"username\":\"ws-lab-7f3k\",\"email\":\"ws-lab-7f3k@quick.aws\",\"emailVerified\":true,\"enabled\":true,\"firstName\":\"Workshop\",\"lastName\":\"Lab\",\"credentials\":[{\"type\":\"password\",\"value\":\"${!ADMIN_CRED}\",\"temporary\":false}]}"
+          echo "User ws-lab-7f3k created"
+          # Create additional user if email provided
+          if [ -n "${!QUICK_USER_EMAIL}" ]; then
+            UN=$(echo "${!QUICK_USER_EMAIL}" | cut -d@ -f1)
+            curl -sk -X POST "${!KC}/admin/realms/aws-realm/users" -H "${!AUTH}" -H "Content-Type: application/json" -d "{\"username\":\"${!UN}\",\"email\":\"${!QUICK_USER_EMAIL}\",\"emailVerified\":true,\"enabled\":true,\"firstName\":\"Quick\",\"lastName\":\"User\",\"credentials\":[{\"type\":\"password\",\"value\":\"${!ADMIN_CRED}\",\"temporary\":false}]}"
+            echo "User ${!UN} created"
+          fi
+          # Step 12: SAML Client
+          curl -sk -X POST "${!KC}/admin/realms/aws-realm/clients" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"clientId":"urn:amazon:webservices","name":"AWS SAML","protocol":"saml","enabled":true,"frontchannelLogout":true,"adminUrl":"https://signin.aws.amazon.com/saml","baseUrl":"/realms/aws-realm/protocol/saml/clients/amazon-aws","redirectUris":["https://signin.aws.amazon.com/saml*","*"],"attributes":{"saml.authnstatement":"true","saml.server.signature":"true","saml.assertion.signature":"true","saml.force.post.binding":"true","saml_name_id_format":"email","saml_force_name_id_format":"true","saml.client.signature":"false","saml_idp_initiated_sso_url_name":"amazon-aws","saml_idp_initiated_sso_relay_state":"https://quicksight.aws.amazon.com","saml_assertion_consumer_url_post":"https://signin.aws.amazon.com/saml","saml.assertion.lifespan":"300"},"fullScopeAllowed":true}'
+          echo "SAML client created"
+          # Step 13: Remove role_list scope
+          SCID=$(curl -sk "${!KC}/admin/realms/aws-realm/clients?clientId=urn:amazon:webservices" -H "${!AUTH}" | jq -r '.[0].id')
+          RLID=$(curl -sk "${!KC}/admin/realms/aws-realm/client-scopes" -H "${!AUTH}" | jq -r '.[] | select(.name=="role_list") | .id')
+          [ -n "${!RLID}" ] && curl -sk -X DELETE "${!KC}/admin/realms/aws-realm/clients/${!SCID}/default-client-scopes/${!RLID}" -H "${!AUTH}" || true
+          echo "role_list removed"
+          # Step 14: SAML Mappers
+          MP="${!KC}/admin/realms/aws-realm/clients/${!SCID}/protocol-mappers/models"
+          curl -sk -X POST "${!MP}" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"name":"aws-role","protocol":"saml","protocolMapper":"saml-hardcode-attribute-mapper","config":{"attribute.value":"arn:aws:iam::'"${!ACCT}"':role/'"${!ROLE_NAME}"',arn:aws:iam::'"${!ACCT}"':saml-provider/'"${!SAML_NAME}"'","friendly.name":"Role","attribute.name":"https://aws.amazon.com/SAML/Attributes/Role","attribute.nameformat":"URI Reference"}}' || true
+          curl -sk -X POST "${!MP}" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"name":"aws-session-name","protocol":"saml","protocolMapper":"saml-user-property-mapper","config":{"user.attribute":"email","friendly.name":"Session Name","attribute.name":"https://aws.amazon.com/SAML/Attributes/RoleSessionName","attribute.nameformat":"URI Reference"}}' || true
+          curl -sk -X POST "${!MP}" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"name":"aws-session-duration","protocol":"saml","protocolMapper":"saml-hardcode-attribute-mapper","config":{"attribute.value":"3600","friendly.name":"Session Duration","attribute.name":"https://aws.amazon.com/SAML/Attributes/SessionDuration","attribute.nameformat":"Basic"}}' || true
+          curl -sk -X POST "${!MP}" -H "${!AUTH}" -H "Content-Type: application/json" -d '{"name":"aws-principal-tag-email","protocol":"saml","protocolMapper":"saml-user-property-mapper","config":{"user.attribute":"email","friendly.name":"PrincipalTag Email","attribute.name":"https://aws.amazon.com/SAML/Attributes/PrincipalTag:Email","attribute.nameformat":"URI Reference"}}' || true
+          echo "SAML mappers created"
+          # Step 15: Update IAM SAML Provider
+          curl -sk -o /tmp/saml-meta.xml "${!KC}/realms/aws-realm/protocol/saml/descriptor"
+          [ -s /tmp/saml-meta.xml ] || signal_failure "download metadata"
+          aws iam update-saml-provider --saml-provider-arn "arn:aws:iam::${!ACCT}:saml-provider/${!SAML_NAME}" --saml-metadata-document file:///tmp/saml-meta.xml --region ${!REGION} || signal_failure "update saml provider"
+          echo "IAM SAML Provider updated"
+          # Step 16: Verify
+          curl -sk "${!KC}/realms/aws-realm/.well-known/openid-configuration" | jq -e '.issuer' > /dev/null && echo "OIDC OK"
+          curl -sk -o /dev/null -w "%{http_code}" "${!KC}/realms/aws-realm/protocol/saml/descriptor" | grep -q 200 && echo "SAML OK"
+          # Done
+          echo "=== Setup Complete $(date) ==="
+          /opt/aws/bin/cfn-signal -e 0 --stack ${!STACK_NAME} --resource KeycloakInstance --region ${!REGION}
+
+  KeycloakEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - {Key: Name, Value: keycloak-anycompany-idp}
+
+  KeycloakEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref KeycloakInstance
+      AllocationId: !GetAtt KeycloakEIP.AllocationId
+
+Outputs:
+  KeycloakURL:
+    Value: !Sub ['https://${IP}.nip.io:8443', {IP: !Ref KeycloakEIP}]
+  IssuerURL:
+    Description: OIDC Issuer URL (Quick Desktop)
+    Value: !Sub ['https://${IP}.nip.io:8443/realms/aws-realm', {IP: !Ref KeycloakEIP}]
+  AuthEndpoint:
+    Value: !Sub ['https://${IP}.nip.io:8443/realms/aws-realm/protocol/openid-connect/auth', {IP: !Ref KeycloakEIP}]
+  TokenEndpoint:
+    Value: !Sub ['https://${IP}.nip.io:8443/realms/aws-realm/protocol/openid-connect/token', {IP: !Ref KeycloakEIP}]
+  JWKSURI:
+    Value: !Sub ['https://${IP}.nip.io:8443/realms/aws-realm/protocol/openid-connect/certs', {IP: !Ref KeycloakEIP}]
+  ClientID:
+    Value: amazon-quick-desktop
+  AdminConsoleURL:
+    Value: !Sub ['https://${IP}.nip.io:8443/admin/', {IP: !Ref KeycloakEIP}]
+  InstancePublicIP:
+    Value: !GetAtt KeycloakInstance.PublicIp
+  SSHCommand:
+    Condition: HasKeyPair
+    Value: !Sub ['ssh -i ${KeyPairName}.pem ec2-user@${IP}', {IP: !Ref KeycloakEIP}]
+  SAMLProviderArn:
+    Value: !Sub 'arn:aws:iam::${AWS::AccountId}:saml-provider/${SAMLProviderName}'
+  QuickSightRoleArn:
+    Value: !GetAtt QuickSightSAMLRole.Arn
+  IdPInitiatedSSOUrl:
+    Description: IdP-initiated SSO URL (Quick Web)
+    Value: !Sub ['https://${IP}.nip.io:8443/realms/aws-realm/protocol/saml/clients/amazon-aws', {IP: !Ref KeycloakEIP}]
+  SAMLMetadataUrl:
+    Value: !Sub ['https://${IP}.nip.io:8443/realms/aws-realm/protocol/saml/descriptor', {IP: !Ref KeycloakEIP}]
