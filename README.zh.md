@@ -143,6 +143,21 @@ aws cloudformation delete-stack --stack-name keycloak-quick-idp --region us-east
 
 将删除所有资源，包括 EC2 实例、EIP、IAM 角色和 SAML Provider。
 
+## 可选扩展：JIT 用户治理
+
+默认情况下，联邦角色的 `quicksight:*` 策略会导致**未预注册的用户在首次 SSO 登录时被 JIT 创建为 ADMIN**（QuickSight 按联邦角色 IAM 权限的最高档决定 JIT 角色）。完整分析、CLI 修改命令、架构图与时序图参见 [docs/quicksight-user-role-management.md](docs/quicksight-user-role-management.md)。
+
+可选模板 [extensions/quick-auto-group-cfn.yaml](extensions/quick-auto-group-cfn.yaml) 通过 EventBridge + Lambda 在用户首次登录时自动治理：将新用户降级到目标角色（默认 `READER_PRO`，支持管理员白名单），并自动加入共享组：
+
+```bash
+aws cloudformation deploy \
+  --template-file extensions/quick-auto-group-cfn.yaml \
+  --stack-name quick-auto-group \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides QuickGroupName=workshop-users TargetRole=READER_PRO \
+      AdminAllowlist="admin1@example.com"
+```
+
 ## License
 
 MIT
