@@ -1,5 +1,7 @@
 # Managing Amazon Quick (QuickSight) User Roles under Keycloak Federation
 
+> [中文版本](quicksight-user-role-management.zh.md)
+
 This document answers three questions for deployments of this stack:
 
 1. **What role do JIT-provisioned users get with the default policy?**
