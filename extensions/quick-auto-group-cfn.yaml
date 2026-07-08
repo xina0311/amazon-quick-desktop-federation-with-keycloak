@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Optional extension for the Keycloak IdP stack: governs JIT-provisioned
+  Amazon Quick (QuickSight) users on first SSO login. When QuickSight emits a
+  CreateUser/RegisterUser event, a Lambda (1) downgrades the user to a target
+  role unless allowlisted, and (2) adds the user to a shared group so they can
+  see shared Spaces/Connectors.
+
+Parameters:
+  QuickGroupName:
+    Type: String
+    Default: workshop-users
+    Description: QuickSight group to auto-add new users to (must already exist)
+  TargetRole:
+    Type: String
+    Default: READER_PRO
+    AllowedValues: [READER, READER_PRO, AUTHOR, AUTHOR_PRO]
+    Description: Role that JIT-provisioned users are downgraded to
+  AdminAllowlist:
+    Type: String
+    Default: ''
+    Description: >
+      Comma-separated emails that are never downgraded,
+      e.g. "admin1@example.com,admin2@example.com"
+
+Resources:
+
+  AutoGroupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: QuickAutoGroupLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: QuickSightUserGovernance
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - quicksight:CreateGroupMembership
+                  - quicksight:ListUsers
+                  - quicksight:DescribeUser
+                  - quicksight:UpdateUser
+                Resource: '*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+
+  AutoGroupLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: quick-auto-group-membership
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt AutoGroupLambdaRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          GROUP_NAME: !Ref QuickGroupName
+          TARGET_ROLE: !Ref TargetRole
+          ADMIN_ALLOWLIST: !Ref AdminAllowlist
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+
+          def lambda_handler(event, context):
+              print(f"Received event: {json.dumps(event)}")
+
+              client = boto3.client('quicksight')
+              group_name = os.environ['GROUP_NAME']
+              target_role = os.environ.get('TARGET_ROLE', 'READER_PRO')
+              allowlist = {e.strip().lower() for e in os.environ.get('ADMIN_ALLOWLIST', '').split(',') if e.strip()}
+
+              detail = event.get('detail', {})
+              account_id = detail.get('recipientAccountId') or detail.get('userIdentity', {}).get('accountId')
+
+              # JIT CreateUser events carry user info in serviceEventDetails
+              service_details = detail.get('serviceEventDetails', {})
+              request_details = service_details.get('eventRequestDetails', {})
+              raw_user_name = request_details.get('userName', '')
+
+              if not raw_user_name:
+                  # Fallback for RegisterUser API calls
+                  response_elements = detail.get('responseElements', {})
+                  user_info = response_elements.get('user', {})
+                  raw_user_name = user_info.get('userName', '')
+
+              if not raw_user_name or not account_id:
+                  print(f"Could not extract user info. account_id={account_id}, raw_user_name={raw_user_name}")
+                  return {'statusCode': 400, 'body': 'Missing user info'}
+
+              # Event gives "RoleName:user@domain"; QuickSight API expects "RoleName/user@domain"
+              user_name = raw_user_name.replace(':', '/', 1)
+              email = user_name.split('/', 1)[-1]
+              print(f"Resolved username: {user_name}")
+
+              # (1) Role governance: downgrade JIT users that came in above target role
+              if email.lower() not in allowlist:
+                  try:
+                      current = client.describe_user(
+                          AwsAccountId=account_id, Namespace='default', UserName=user_name
+                      )['User']['Role']
+                      if current in ('ADMIN', 'ADMIN_PRO', 'AUTHOR', 'AUTHOR_PRO') and current != target_role:
+                          client.update_user(
+                              AwsAccountId=account_id, Namespace='default',
+                              UserName=user_name, Email=email, Role=target_role,
+                          )
+                          print(f"Role fixed: {user_name} {current} -> {target_role}")
+                  except Exception as e:
+                      print(f"Role fix failed for {user_name}: {e}")
+              else:
+                  print(f"{email} in allowlist, skipping role governance")
+
+              # (2) Add user to shared group
+              try:
+                  client.create_group_membership(
+                      AwsAccountId=account_id,
+                      Namespace='default',
+                      GroupName=group_name,
+                      MemberName=user_name
+                  )
+                  print(f"Successfully added {user_name} to {group_name}")
+                  return {'statusCode': 200, 'body': f'Added {user_name} to {group_name}'}
+              except client.exceptions.ResourceExistsException:
+                  print(f"{user_name} already in {group_name}")
+                  return {'statusCode': 200, 'body': f'{user_name} already in group'}
+              except Exception as e:
+                  print(f"Error adding {user_name} to {group_name}: {str(e)}")
+                  return {'statusCode': 500, 'body': str(e)}
+
+  # JIT CreateUser is an AWS Service Event, not an API Call
+  AutoGroupEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: quick-new-user-auto-group
+      Description: Trigger Lambda when a new user is created in QuickSight via JIT provisioning
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.quicksight
+        detail:
+          eventSource:
+            - quicksight.amazonaws.com
+          eventName:
+            - CreateUser
+            - RegisterUser
+      Targets:
+        - Id: AutoGroupLambda
+          Arn: !GetAtt AutoGroupLambda.Arn
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AutoGroupLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AutoGroupEventRule.Arn
+
+Outputs:
+  LambdaFunctionArn:
+    Description: ARN of the auto-group Lambda function
+    Value: !GetAtt AutoGroupLambda.Arn
+  EventRuleArn:
+    Description: ARN of the EventBridge rule
+    Value: !GetAtt AutoGroupEventRule.Arn

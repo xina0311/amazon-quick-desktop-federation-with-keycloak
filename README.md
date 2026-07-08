@@ -143,6 +143,21 @@ aws cloudformation delete-stack --stack-name keycloak-quick-idp --region us-east
 
 This removes all resources including the EC2 instance, EIP, IAM roles, and SAML provider.
 
+## Optional Extension: JIT User Governance
+
+By default, the federation role's `quicksight:*` policy causes **JIT-provisioned users to be created as ADMIN** on first SSO login (QuickSight picks the highest role the federation role's IAM permissions allow). See [docs/quicksight-user-role-management.md](docs/quicksight-user-role-management.md) for the full analysis, CLI commands, and architecture/sequence diagrams.
+
+The optional stack [extensions/quick-auto-group-cfn.yaml](extensions/quick-auto-group-cfn.yaml) governs new users automatically on first login (EventBridge + Lambda): downgrades them to a configurable target role (default `READER_PRO`, with an admin allowlist) and adds them to a shared group:
+
+```bash
+aws cloudformation deploy \
+  --template-file extensions/quick-auto-group-cfn.yaml \
+  --stack-name quick-auto-group \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides QuickGroupName=workshop-users TargetRole=READER_PRO \
+      AdminAllowlist="admin1@example.com"
+```
+
 ## License
 
 MIT
