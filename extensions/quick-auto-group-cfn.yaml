@@ -115,7 +115,7 @@ Resources:
                       current = client.describe_user(
                           AwsAccountId=account_id, Namespace='default', UserName=user_name
                       )['User']['Role']
-                      if current in ('ADMIN', 'ADMIN_PRO', 'AUTHOR', 'AUTHOR_PRO') and current != target_role:
+                      if current in ('READER', 'READER_PRO', 'AUTHOR', 'AUTHOR_PRO') and current != target_role:
                           client.update_user(
                               AwsAccountId=account_id, Namespace='default',
                               UserName=user_name, Email=email, Role=target_role,
